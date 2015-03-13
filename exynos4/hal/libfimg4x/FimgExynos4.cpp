@@ -17,7 +17,7 @@
 **
 */
 
-#define LOG_NDEBUG 0
+//#define LOG_NDEBUG 0
 #define LOG_TAG "FimgExynos4"
 #include <utils/Log.h>
 
@@ -254,12 +254,36 @@ bool FimgV4x::m_DestroyG2D(void)
 
 bool FimgV4x::m_DoG2D(struct fimg2d_blit *cmd)
 {
-    /* BLIT_OP_SOLID_FILL fails. Don't use it for now */
-    if (cmd->op == BLIT_OP_SOLID_FILL)
+    if (cmd->seq_no == SEQ_NO_CMD_SET_DBUFFER) {
+        PRINT("%s SEQ_NO_CMD_SET_DBUFFER start=0x%x", __func__, cmd->tmp->addr.start);
+        if (ioctl(m_g2dFd, FIMG2D_BITBLT_DBUFFER, &cmd->tmp->addr.start) < 0)
+            return false;
+        else
+            return true;
+    }
+
+    if (cmd->seq_no == SEQ_NO_CMD_SECURE_ON) {
+        PRINT("%s SEQ_NO_CMD_SECURE_ON", __func__);
+        // TODO
         return true;
+    }
+
+    if (cmd->seq_no == SEQ_NO_CMD_SECURE_OFF) {
+        PRINT("%s SEQ_NO_CMD_SECURE_OFF", __func__);
+	    // TODO
+        return true;
+    }
+
+    if (cmd->seq_no == SEQ_NO_BLT_HWC_SEC) {
+        PRINT("%s SEQ_NO_BLT_HWC_SEC", __func__);
+        // TODO
+        return true;
+    }
 
     if (ioctl(m_g2dFd, FIMG2D_BITBLT_BLIT, cmd) < 0)
         return false;
+
+    PRINT("%s FIMG2D_BITBLT_BLIT seq_no=%x op=%d", __func__, cmd->seq_no, cmd->op);
 
     return true;
 }
