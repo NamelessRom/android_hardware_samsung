@@ -24,8 +24,10 @@
 #include <utils/Log.h>
 #include "sec_g2d_4x.h"
 
-#undef REAL_DEBUG
-#undef ANDROID_LOG
+#define REAL_DEBUG
+#define ANDROID_LOG
+//#undef REAL_DEBUG
+//#undef ANDROID_LOG
 
 #if defined(REAL_DEBUG)
 #ifdef ANDROID_LOG
@@ -149,6 +151,11 @@ int stretchFimgApi(struct fimg2d_blit *cmd);
 extern "C"
 #endif
 int SyncFimgApi(void);
+
+#ifdef __cplusplus
+extern "C"
+#endif
+int FimgApiCheckBoostup(Fimg *curr, Fimg *prev);
 
 void printDataBlit(char *title, struct fimg2d_blit *cmd);
 void printDataBlitRotate(int rotate);

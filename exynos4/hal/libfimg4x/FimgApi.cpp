@@ -268,6 +268,116 @@ extern "C" int SyncFimgApi(void)
     return 0;
 }
 
+int comp_value[5][2] = {{511,582},{576,668},{768,924},{1152,1436},{1536,1948}};
+
+extern "C" int FimgApiCheckBoostup(Fimg *curr, Fimg *prev)
+{
+    int i = 0;
+
+    for (i = 0; i < 5; i++) {
+        if ((curr->srcW == comp_value[i][0]) && (curr->srcH == comp_value[i][1]))
+            break;
+    }
+
+    if (i == 5)
+        return 0;
+
+    if (curr->alpha != 255)
+        return 0;
+
+    if (curr->srcAddr != prev->srcAddr)
+        return 0;
+
+    if (curr->srcX != prev->srcX)
+        return 0;
+
+    if (curr->srcY != prev->srcY)
+        return 0;
+
+    if (curr->srcW != prev->srcW)
+        return 0;
+
+    if (curr->srcH != prev->srcH )
+        return 0;
+
+    if (curr->srcFWStride != prev->srcFWStride)
+        return 0;
+
+    if (curr->srcFH != prev->srcFH)
+        return 0;
+
+    if (curr->srcColorFormat != prev->srcColorFormat)
+        return 0;
+
+    if (curr->dstAddr != prev->dstAddr)
+        return 0;
+
+    if (curr->dstX != prev->dstX)
+        return 0;
+
+    if (curr->dstY != prev->dstY)
+        return 0;
+
+    if (curr->dstW != prev->dstW)
+        return 0;
+
+    if (curr->dstH != prev->dstH)
+        return 0;
+
+    if (curr->dstFWStride != prev->dstFWStride)
+        return 0;
+
+    if (curr->dstFH != prev->dstFH)
+        return 0;
+
+    if (curr->dstColorFormat != prev->dstColorFormat)
+        return 0;
+
+    if (curr->clipT != prev->clipT)
+        return 0;
+
+    if (curr->clipB != prev->clipB)
+        return 0;
+
+    if (curr->clipL != prev->clipL)
+        return 0;
+
+    if (curr->clipR != prev->clipR)
+        return 0;
+
+    if (curr->fillcolor != prev->fillcolor)
+        return 0;
+
+    if (curr->rotate != prev->rotate)
+        return 0;
+
+    if (prev->alpha != 255)
+        return 0;
+
+    if (curr->xfermode != prev->xfermode)
+        return 0;
+
+    if (curr->isDither != prev->isDither)
+        return 0;
+
+    if (curr->isFilter != prev->isFilter)
+        return 0;
+
+    if (curr->colorFilter != prev->colorFilter)
+        return 0;
+
+    if (curr->matrixType != prev->matrixType)
+        return 0;
+
+    if (curr->matrixSx != prev->matrixSx)
+        return 0;
+
+    if (curr->matrixSy != prev->matrixSy)
+        return 0;
+
+    return 1;
+}
+
 void printDataBlit(char *title, struct fimg2d_blit *cmd)
 {
     SLOGI("%s\n", title);
