@@ -254,9 +254,27 @@ bool FimgV4x::m_DestroyG2D(void)
 
 bool FimgV4x::m_DoG2D(struct fimg2d_blit *cmd)
 {
-    /* BLIT_OP_SOLID_FILL fails. Don't use it for now */
-    if (cmd->op == BLIT_OP_SOLID_FILL)
+    if (cmd->seq_no == SEQ_NO_CMD_SET_DBUFFER) {
+        if (ioctl(m_g2dFd, FIMG2D_BITBLT_DBUFFER, &cmd->tmp->addr.start) < 0)
+            return false;
+        else
+            return true;
+    }
+
+    if (cmd->seq_no == SEQ_NO_CMD_SECURE_ON) {
+        // TODO
         return true;
+    }
+
+    if (cmd->seq_no == SEQ_NO_CMD_SECURE_OFF) {
+	    // TODO
+        return true;
+    }
+
+    if (cmd->seq_no == SEQ_NO_BLT_HWC_SEC) {
+        // TODO
+        return true;
+    }
 
     if (ioctl(m_g2dFd, FIMG2D_BITBLT_BLIT, cmd) < 0)
         return false;
