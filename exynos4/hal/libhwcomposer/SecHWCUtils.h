@@ -33,24 +33,27 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <cutils/log.h>
+#include <poll.h>
 
-#include <linux/videodev.h>
+//#include <linux/videodev.h>
+#include <linux/fb.h>
+#include <sync/sync.h>
+
 #include "videodev2.h"
 #include "s5p_fimc.h"
 #include "sec_utils.h"
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
-#include <hardware/gralloc.h>
-
-#include "linux/fb.h"
+#include "gralloc_priv.h"
 
 #include "s3c_lcd.h"
 #include "sec_format.h"
+#include "secion.h"
 
 //#define HWC_DEBUG 1
 #if defined(BOARD_USES_FIMGAPI)
-#include "sec_g2d.h"
+#include "FimgApi.h"
 #endif
 
 #define SKIP_DUMMY_UI_LAY_DRAWING
@@ -61,8 +64,11 @@
 #endif
 
 #define NUM_OF_DUMMY_WIN    (4)
-#define NUM_OF_WIN          (2)
-#define NUM_OF_WIN_BUF      (2)
+
+const size_t NUM_HW_WINDOWS = 5;
+const size_t NO_FB_NEEDED = NUM_HW_WINDOWS + 1;
+
+#define NUM_OF_WIN_BUF      (3)
 #define NUM_OF_MEM_OBJ      (1)
 
 #if (NUM_OF_WIN_BUF < 2)
@@ -72,7 +78,7 @@
 #define MAX_RESIZING_RATIO_LIMIT  (63)
 
 #ifdef SAMSUNG_EXYNOS4x12
-#define PP_DEVICE_DEV_NAME  "/dev/video3"
+#define PP_DEVICE_DEV_NAME  "/dev/video2"
 #endif
 
 #ifdef SAMSUNG_EXYNOS4210
@@ -81,6 +87,8 @@
 
 /* cacheable configuration */
 #define V4L2_CID_CACHEABLE			(V4L2_CID_BASE+40)
+
+#define EXYNOS4_ALIGN( value, base ) (((value) + ((base) - 1)) & ~((base) - 1))
 
 struct sec_rect {
     int32_t x;
@@ -118,19 +126,24 @@ inline int SEC_MAX(int x, int y)
 struct hwc_win_info_t {
     int        fd;
     int        size;
-    sec_rect   rect_info;
-    uint32_t   addr[NUM_OF_WIN_BUF];
-    int        buf_index;
+    sec_rect   rect_info;//0x8 in blob it has offset 0x18
+    uint32_t   addr[NUM_OF_WIN_BUF]; //0x18, in blob it has offset 0x64
+    int        buf_index; // 0x24, in blob it has offset
 
-    int        power_state;
-    int        blending;
-    int        layer_index;
-    int        status;
-    int        vsync;
+    int        power_state; // 0x28 -> in blob has offset 0x80
+    int        blending; //0x2c
+    int        layer_index; //0x30
+    int        status; //0x34
+    int        vsync; // 0x38
+    int        field8c;
+    int        field90;
 
-    struct fb_fix_screeninfo fix_info;
-    struct fb_var_screeninfo var_info;
+    struct fb_fix_screeninfo fix_info; //0x3c -> in blob it has offset 0x9c
+    struct fb_var_screeninfo var_info; // in blob, offset 0xe0
     struct fb_var_screeninfo lcd_info;
+
+    struct secion_param secion_param[NUM_OF_WIN_BUF]; //in blob, it has offset 0x28
+    int    fence[NUM_OF_WIN_BUF]; //in blob, it has offset 0x70
 };
 
 enum {
@@ -149,15 +162,25 @@ struct hwc_ui_lay_info{
     uint32_t   layer_prev_buf;
     int        layer_index;
     int        status;
+    sec_rect   crop_info;
+    sec_rect   display_frame;
 };
 #endif
+
+struct ion_hdl{
+    ion_client          client;
+    struct secion_param param;
+    ion_client          client2;
+};
 
 struct hwc_context_t {
     hwc_composer_device_1_t device;
 
     /* our private state goes below here */
-    struct hwc_win_info_t     win[NUM_OF_WIN];
-    struct hwc_win_info_t     global_lcd_win;
+    struct hwc_win_info_t     win[NUM_HW_WINDOWS]; //offset 0x1f8, win[0] in 0x1f8, win[1] in 0x418, win[2] in 0x638, win[3] in 0x858, win[4] in 0xa78
+    struct hwc_win_info_t     global_lcd_win; // in blob it has offset 0x1044, accessed via 0x1040 + 4
+    struct hwc_win_info_t     fbdev1_win; // 0xe24
+
 #ifdef SKIP_DUMMY_UI_LAY_DRAWING
     struct hwc_ui_lay_info    win_virt[NUM_OF_DUMMY_WIN];
     int                       fb_lay_skip_initialized;
@@ -167,25 +190,99 @@ struct hwc_context_t {
 #endif
 #endif
 
-    struct fb_var_screeninfo  lcd_info;
-    s5p_fimc_t                fimc;
-    hwc_procs_t               *procs;
+    struct fb_var_screeninfo  lcd_info; //in blob it has offset 0x1480 + 4
+    struct fb_var_screeninfo  fbdev1_info; //in blob it has offset 0x1520 + 4
+    s5p_fimc_t                fimc;  //a similar structure has offset 0x15c0 + 4 in blob
+    hwc_procs_t               *procs; // in blob, it has offset 0x98
     pthread_t                 uevent_thread;
-    pthread_t                 vsync_thread;
 
+    pthread_t                 vsync_thread;
+    int                       vsync_thread_enabled;
+    int                       vsync_a5;
+    int                       vsync_a6;
+    int                       vsync_a7;
+    int                       vsync_a8;
+    int                       field_ac;
+
+    pthread_t                 sync_merge_thread;
+    pthread_cond_t            sync_merge_condition;
+    pthread_mutex_t           sync_merge_thread_mutex;
+    int                       sync_merge_thread_running;
+    int                       sync_merge_thread_enabled;
+    int                       sync_merge_thread_created;
+    int                       sync_merge_ready; //struct 19a0, offset 0x14
+
+    pthread_t                 fimc_thread;
+    pthread_cond_t            fimc_thread_condition; //struct 19c0, offset 4
+    pthread_mutex_t           fimc_thread_mutex;
+    int                       fimc_thread_enabled;  //struct 19a0, offset 1c
+
+    pthread_t                 capture_thread;
+    int                       capture_thread_enabled; //byte_1021C
+    int                       capture_thread_created;
+
+    struct private_module_t   *gralloc;
     int                       num_of_fb_layer;
-    int                       num_of_hwc_layer;
+    int                       num_of_hwc_layer; // 0xcb4
     int                       num_of_fb_layer_prev;
     int                       num_2d_blit_layer;
-    uint32_t                  layer_prev_buf[NUM_OF_WIN];
+    uint32_t                  layer_prev_buf[NUM_HW_WINDOWS];
 
-    int                       num_of_ext_disp_layer;
-    int                       num_of_ext_disp_video_layer;
+    int                       num_of_ext_disp_layer; // offset 0xc98
+    int                       num_of_ext_disp_video_layer; //offset 0xc9c
+    int                       num_of_hwoverlay_layer; // offset 0xcac
+    int                       num_of_other_layer; //offset 0xca8
+    int                       num_of_camera_layer; //offset 0xcb0
 
 #ifdef BOARD_USES_HDMI
-    int                       hdmi_cable_status;
+    int                       hdmiCableStatus; //struct 16c0, offset 0x18
+    android::SecHdmiClient    hdmiClient; //str18c0 field 8
+    int                       hdmiMirrorWithVideoMode; //str16e0 offset 0
+    int                       hdmiVideoTransform;  //19a0 offset 8
+    bool                      hdmi_cable_status_changed; //16c0 offset 1c
 #endif
+
+    int                       hdmi_xres; //0xcf4
+    int                       hdmi_yres; //0xcf8
+
+    int                       wfd_connected; //0x1e4
+    int                       wfd_connected_last; //0x1e8
+
+    struct ion_hdl            ion_hdl;  // 0x1640 + 4
+    struct ion_hdl            fimg_tmp_ion_hdl; //0x1660
+    struct ion_hdl            fimg_ion_hdl; // 0x1680
+
+    int                       overlay_map[NUM_HW_WINDOWS]; //0x7c
+    int                       fb_window; //0x90
+
+    int                       xres; //0xb0
+    int                       yres; //0xb4
+    float                     xdpi; //0xb8
+    float                     ydpi; //0xbc
+    int                       vsync_period; //0x0c
+
+    int                       max_private_layer; //str1680 field 18
+    int                       num_of_private_layer; // 0xca4
+    int                       str1680_field1c;
+    int                       str16a0_field0;
+    int                       str16a0_field8; //str16a0 field 8
+    int                       str1960_fieldc;
+    int                       str1980_yres; //field 0
+    int                       fbdev1_win_needs_buffer; //str1980 field 18
+    int                       str1980_field18;
+    bool                      fimg_secure;
+    int                       str1980_field1c;
+    int                       currentNumHwLayers; //str19a0 field 0x10
+    hwc_display_contents_1   *currentDisplay; //str19a0 field 0xc
+    unsigned int              str16c0_field4;
+
+    bool                      avoid_eglSwapBuffers; //str19a0 offset 18
+    bool                      str19a0_field19;
+    bool                      str19a0_field1a;
+    bool                      str19a0_field1b;
 };
+
+
 
 typedef enum _LOG_LEVEL {
     HWC_LOG_DEBUG,
@@ -276,11 +373,11 @@ __attribute__((aligned(sizeof(int)),packed)) sec_native_handle_t;
 int window_open       (struct hwc_win_info_t *win, int id);
 int window_close      (struct hwc_win_info_t *win);
 int window_set_pos    (struct hwc_win_info_t *win);
-int window_get_info   (struct hwc_win_info_t *win, int win_num);
+int window_get_info   (struct hwc_win_info_t *win);
 int window_pan_display(struct hwc_win_info_t *win);
 int window_show       (struct hwc_win_info_t *win);
 int window_hide       (struct hwc_win_info_t *win);
-int window_get_global_lcd_info(struct hwc_context_t *ctx);
+int window_get_global_lcd_info(int fd, struct fb_var_screeninfo *lcd_info);
 
 int createFimc (s5p_fimc_t *fimc);
 int destroyFimc(s5p_fimc_t *fimc);
@@ -288,6 +385,16 @@ int runFimc(struct hwc_context_t *ctx,
 	    struct sec_img *src_img, struct sec_rect *src_rect,
 	    struct sec_img *dst_img, struct sec_rect *dst_rect,
 	    uint32_t transform);
+void clearBufferbyFimc(struct hwc_context_t *ctx, sec_img *dst_img);
 int check_yuv_format(unsigned int color_format);
+void dump_win(struct hwc_win_info_t *win);
+int waiting_fimc_csc(int fd);
+
+int formatValueHAL2G2D(unsigned int format, unsigned int *g2d_format,
+        unsigned int *pixel_order, unsigned int *bpp);
+int rotateValueHAL2G2D(unsigned char transform);
+
+int get_buf_index(hwc_win_info_t *win);
+int get_user_ptr_buf_index(hwc_win_info_t *win);
 
 #endif /* ANDROID_SEC_HWC_UTILS_H_*/

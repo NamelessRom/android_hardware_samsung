@@ -25,10 +25,8 @@
  */
 
 #include "SecHWCUtils.h"
-#define V4L2_BUF_TYPE_OUTPUT V4L2_BUF_TYPE_VIDEO_OUTPUT
-#define V4L2_BUF_TYPE_CAPTURE V4L2_BUF_TYPE_VIDEO_CAPTURE
 
-#define EXYNOS4_ALIGN( value, base ) (((value) + ((base) - 1)) & ~((base) - 1))
+#define V4L2_BUF_TYPE_CAPTURE V4L2_BUF_TYPE_VIDEO_CAPTURE
 
 //#define CHECK_FPS
 #ifdef CHECK_FPS
@@ -82,12 +80,49 @@ struct yuv_fmt_list yuv_list[] = {
     { "V4L2_PIX_FMT_YUV422P",   "YUV422/3P",            V4L2_PIX_FMT_YUV422P,  16, 3 },
 };
 
+void dump_win(struct hwc_win_info_t *win)
+{
+    int i = 0;
+
+    SEC_HWC_Log(HWC_LOG_DEBUG, "Dump Window Information");
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->fd = %d", win->fd);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->size = %d", win->size);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->rect_info.x = %d", win->rect_info.x);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->rect_info.y = %d", win->rect_info.y);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->rect_info.w = %d", win->rect_info.w);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->rect_info.h = %d", win->rect_info.h);
+
+    for (i = 0; i < NUM_OF_WIN_BUF; i++) {
+        SEC_HWC_Log(HWC_LOG_DEBUG, "win->addr[%d] = 0x%x", win->addr[i]);
+    }
+
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->buf_index = %d", win->buf_index);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->power_state = %d", win->power_state);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->blending = %d", win->blending);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->layer_index = %d", win->layer_index);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->status = %d", win->status);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->vsync = %d", win->vsync);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->fix_info.smem_start = 0x%x", win->fix_info.smem_start);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->fix_info.line_length = %d", win->fix_info.line_length);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->var_info.xres = %d", win->var_info.xres);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->var_info.yres = %d", win->var_info.yres);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->var_info.xres_virtual = %d", win->var_info.xres_virtual);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->var_info.yres_virtual = %d", win->var_info.yres_virtual);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->var_info.xoffset = %d", win->var_info.xoffset);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->var_info.yoffset = %d", win->var_info.yoffset);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->lcd_info.xres = %d", win->lcd_info.xres);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->lcd_info.yres = %d", win->lcd_info.yres);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->lcd_info.xoffset = %d", win->lcd_info.xoffset);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->lcd_info.yoffset = %d", win->lcd_info.yoffset);
+    SEC_HWC_Log(HWC_LOG_DEBUG, "win->lcd_info.bits_per_pixel = %d", win->lcd_info.bits_per_pixel);
+}
+
 int window_open(struct hwc_win_info_t *win, int id)
 {
     int fd = 0;
     char name[64];
     int vsync = 1;
-    int real_id = id;
+    int real_id;
 
     char const * const device_template = "/dev/graphics/fb%u";
     // window & FB maping
@@ -98,33 +133,15 @@ int window_open(struct hwc_win_info_t *win, int id)
     // fb4 -> win_id : 1
     // it is pre assumed that ...win0 or win1 is used here..
 
-    switch (id) {
-    case 0:
-        real_id = 3;
-        break;
-    case 1:
-        real_id = 4;
-        break;
-    case 2:
-        real_id = 0;
-        break;
-    case 3:
-        real_id = 1;
-        break;
-    case 4:
-        real_id = 2;
-        break;
-    default:
+    if (id <= NUM_HW_WINDOWS - 1)
+        real_id = (id + 3) % NUM_HW_WINDOWS;
+    else if (id == NUM_HW_WINDOWS)
+        real_id = id;
+    else {
         SEC_HWC_Log(HWC_LOG_ERROR, "%s::id(%d) is weird", __func__, id);
         goto error;
-}
+    }
 
-//  0/10
-//    snprintf(name, 64, device_template, id + 3);
-//  5/10
-//    snprintf(name, 64, device_template, id + 0);
-//  0/10
-//    snprintf(name, 64, device_template, id + 1);
     snprintf(name, 64, device_template, real_id);
 
     win->fd = open(name, O_RDWR);
@@ -133,13 +150,6 @@ int window_open(struct hwc_win_info_t *win, int id)
                 __func__, strerror(errno), name);
         goto error;
     }
-
-#ifdef ENABLE_FIMD_VSYNC
-    if (ioctl(win->fd, S3CFB_SET_VSYNC_INT, &vsync) < 0) {
-        SEC_HWC_Log(HWC_LOG_ERROR, "%s::S3CFB_SET_VSYNC_INT fail", __func__);
-        goto error;
-    }
-#endif
 
     return 0;
 
@@ -151,17 +161,24 @@ error:
     return -1;
 }
 
+int window_clear(struct hwc_context_t *ctx)
+{
+    struct s3c_fb_win_config_data config;
+
+    memset(&config, 0, sizeof(struct s3c_fb_win_config_data));
+    if ( ioctl(ctx->global_lcd_win.fd, S3CFB_WIN_CONFIG, &config) < 0 )
+    {
+        SEC_HWC_Log(HWC_LOG_ERROR, "%s::S3CFB_WIN_CONFIG failed to clear screen : %s", __func__, strerror(errno));
+    }
+
+    return config.fence;
+}
+
 int window_close(struct hwc_win_info_t *win)
 {
     int ret = 0;
 
     if (0 < win->fd) {
-
-#ifdef ENABLE_FIMD_VSYNC
-        int vsync = 0;
-        if (ioctl(win->fd, S3CFB_SET_VSYNC_INT, &vsync) < 0)
-            SEC_HWC_Log(HWC_LOG_ERROR, "%s::S3CFB_SET_VSYNC_INT fail", __func__);
-#endif
         ret = close(win->fd);
     }
     win->fd = 0;
@@ -169,19 +186,43 @@ int window_close(struct hwc_win_info_t *win)
     return ret;
 }
 
+int window_set_addr(struct hwc_win_info_t *win)
+{
+    if ( ioctl(win->fd, S3CFB_EXTDSP_SET_WIN_ADDR, win->addr[win->buf_index]) < 0 ) {
+    	SEC_HWC_Log(HWC_LOG_ERROR, "%s::S3CFB_EXTDSP_SET_WIN_ADDR failed : %s", __func__, strerror(errno));
+    	dump_win(win);
+    	return -1;
+    }
+
+    if ( ioctl(win->fd, FBIOPAN_DISPLAY, win->var_info) < 0) {
+    	SEC_HWC_Log(HWC_LOG_ERROR, "%s::FBIOPAN_DISPLAY(%d / %d / %d) failed : %s", __func__, win->var_info.yres,
+            win->buf_index, win->var_info.yres_virtual, strerror(errno));
+        dump_win(win);
+        return -1;
+    }
+
+    return 0;
+}
+
 int window_set_pos(struct hwc_win_info_t *win)
 {
     struct s3cfb_user_window window;
 
-    //before changing the screen configuration...powerdown the window
-    if (window_hide(win) != 0)
+    window.x = win->rect_info.x;
+    window.y = win->rect_info.y;
+
+    if (ioctl(win->fd, S3CFB_WIN_POSITION, &window) < 0) {
+        SEC_HWC_Log(HWC_LOG_ERROR, "%s::S3CFB_WIN_POSITION(%d, %d) fail",
+            __func__, window.x, window.y);
+        dump_win(win);
         return -1;
+    }
 
-    SEC_HWC_Log(HWC_LOG_DEBUG, "%s:: x(%d), y(%d)",
-            __func__, win->rect_info.x, win->rect_info.y);
+    /*SEC_HWC_Log(HWC_LOG_DEBUG, "%s:: x(%d), y(%d)",
+            __func__, win->rect_info.x, win->rect_info.y);*/
 
-    win->var_info.xres_virtual = (win->lcd_info.xres + 15) & ~ 15;
-    win->var_info.yres_virtual = win->lcd_info.yres * NUM_OF_WIN_BUF;
+    win->var_info.xres_virtual = EXYNOS4_ALIGN(win->rect_info.w, 16);
+    win->var_info.yres_virtual = win->rect_info.h * NUM_OF_WIN_BUF;
     win->var_info.xres = win->rect_info.w;
     win->var_info.yres = win->rect_info.h;
 
@@ -191,56 +232,30 @@ int window_set_pos(struct hwc_win_info_t *win)
     if (ioctl(win->fd, FBIOPUT_VSCREENINFO, &(win->var_info)) < 0) {
         SEC_HWC_Log(HWC_LOG_ERROR, "%s::FBIOPUT_VSCREENINFO(%d, %d) fail",
           __func__, win->rect_info.w, win->rect_info.h);
+        dump_win(win);
         return -1;
-    }
-
-    window.x = win->rect_info.x;
-    window.y = win->rect_info.y;
-
-    if (ioctl(win->fd, S3CFB_WIN_POSITION, &window) < 0) {
-        SEC_HWC_Log(HWC_LOG_ERROR, "%s::S3CFB_WIN_POSITION(%d, %d) fail",
-            __func__, window.x, window.y);
-      return -1;
     }
 
     return 0;
 }
 
-int window_get_info(struct hwc_win_info_t *win, int win_num)
+int window_get_info(struct hwc_win_info_t *win)
 {
-    int temp_size = 0;
-
     if (ioctl(win->fd, FBIOGET_FSCREENINFO, &win->fix_info) < 0) {
         SEC_HWC_Log(HWC_LOG_ERROR, "FBIOGET_FSCREENINFO failed : %s",
-                strerror(errno));
-        goto error;
+            strerror(errno));
+
+        dump_win(win);
+        win->fix_info.smem_start = NULL;
+        return -1;
     }
 
-    win->size = win->fix_info.line_length * win->var_info.yres;
-
-    for (int j = 0; j < NUM_OF_WIN_BUF; j++) {
-        temp_size = win->size * j;
-        win->addr[j] = win->fix_info.smem_start + temp_size;
-        SEC_HWC_Log(HWC_LOG_DEBUG, "%s::win-%d add[%d]  %x ",
-                __func__, win_num, j,  win->addr[j]);
-    }
     return 0;
-
-error:
-    win->fix_info.smem_start = 0;
-
-    return -1;
 }
 
 int window_pan_display(struct hwc_win_info_t *win)
 {
     struct fb_var_screeninfo *lcd_info = &(win->lcd_info);
-
-#ifdef ENABLE_FIMD_VSYNC
-    if (ioctl(win->fd, FBIO_WAITFORVSYNC, 0) < 0)
-        SEC_HWC_Log(HWC_LOG_ERROR, "%s::FBIO_WAITFORVSYNC fail(%s)",
-                __func__, strerror(errno));
-#endif
 
     lcd_info->yoffset = lcd_info->yres * win->buf_index;
 
@@ -258,9 +273,10 @@ int window_pan_display(struct hwc_win_info_t *win)
 int window_show(struct hwc_win_info_t *win)
 {
     if (win->power_state == 0) {
-        if (ioctl(win->fd, FBIOBLANK, FB_BLANK_UNBLANK) < 0) {
-            SEC_HWC_Log(HWC_LOG_ERROR, "%s::FBIOBLANK failed : (%d:%s)",
+        if (ioctl(win->fd, S3CFB_SET_WIN_ON, (unsigned int) 0) < 0) {
+            SEC_HWC_Log(HWC_LOG_ERROR, "%s::S3CFB_SET_WIN_ON failed : (%d:%s)",
                 __func__, win->fd, strerror(errno));
+            dump_win(win);
             return -1;
         }
         win->power_state = 1;
@@ -271,9 +287,10 @@ int window_show(struct hwc_win_info_t *win)
 int window_hide(struct hwc_win_info_t *win)
 {
     if (win->power_state == 1) {
-        if (ioctl(win->fd, FBIOBLANK, FB_BLANK_POWERDOWN) < 0) {
-            SEC_HWC_Log(HWC_LOG_ERROR, "%s::FBIOBLANK failed : (%d:%s)",
+        if (ioctl(win->fd, S3CFB_SET_WIN_OFF, (unsigned int) 0) < 0) {
+            SEC_HWC_Log(HWC_LOG_ERROR, "%s::S3CFB_SET_WIN_OFF failed : (%d:%s)",
              __func__, win->fd, strerror(errno));
+            dump_win(win);
             return -1;
         }
         win->power_state = 0;
@@ -281,27 +298,177 @@ int window_hide(struct hwc_win_info_t *win)
     return 0;
 }
 
-int window_get_global_lcd_info(struct hwc_context_t *ctx)
+int window_power_on(struct hwc_win_info_t *win)
 {
-    if (ioctl(ctx->global_lcd_win.fd, FBIOGET_VSCREENINFO, &ctx->lcd_info) < 0) {
-        SEC_HWC_Log(HWC_LOG_ERROR, "FBIOGET_VSCREENINFO failed : %s",
-                strerror(errno));
+    if (win->power_state == 0) {
+        if (ioctl(win->fd, FBIOBLANK, FB_BLANK_UNBLANK) < 0) {
+            SEC_HWC_Log(HWC_LOG_ERROR, "%s::FBIOBLANK failed : (%d:%s)",
+                __func__, win->fd, strerror(errno));
+            dump_win(win);
+            return -1;
+        }
+        win->power_state = 1;
+    }
+    return 0;
+}
+
+int window_power_down(struct hwc_win_info_t *win)
+{
+    if (win->power_state == 1) {
+    	if (ioctl(win->fd, FBIOBLANK, FB_BLANK_POWERDOWN) < 0) {
+             SEC_HWC_Log(HWC_LOG_ERROR, "%s::FBIOBLANK failed : (%d:%s)",
+             __func__, win->fd, strerror(errno));
+            dump_win(win);
+            return -1;
+        }
+        win->power_state = 0;
+    }
+    return 0;
+}
+
+int window_get_global_lcd_info(int fd, struct fb_var_screeninfo *lcd_info)
+{
+    if (ioctl(fd, FBIOGET_VSCREENINFO, lcd_info) < 0) {
+         SEC_HWC_Log(HWC_LOG_ERROR, "FBIOGET_VSCREENINFO failed : %s",
+                 strerror(errno));
+         return -1;
+     }
+
+     return 0;
+ }
+
+int window_buffer_allocate(struct hwc_context_t *ctx, struct hwc_win_info_t *win, unsigned int x, unsigned int y, unsigned int w, unsigned int h)
+{
+    int rc = 0;
+    fb_var_screeninfo vinfo;
+    int i, size;
+
+    //SEC_HWC_Log(HWC_LOG_ERROR, "%s win->fd=%d ctx->ionclient=%d", __func__, win->fd, ctx->ionclient);
+
+    rc = window_get_global_lcd_info(win->fd, (fb_var_screeninfo *) &vinfo);
+    if ( rc < 0 )
+    {
+        SEC_HWC_Log(HWC_LOG_ERROR, "%s window_get_global_lcd_info returned error: %s", __func__, strerror(errno));
         return -1;
     }
 
-    if (ctx->lcd_info.xres == 0) {
-        SEC_HWC_Log(HWC_LOG_ERROR, "ATTENTION: XRES IS 0");
+    memcpy(&win->var_info, &vinfo, sizeof(fb_var_screeninfo));
+
+    win->rect_info.x = x;
+    win->rect_info.y = y;
+    win->rect_info.w = w;
+    win->rect_info.h = h;
+
+    win->var_info.xres = w;
+    win->var_info.yres = h;
+    win->var_info.xres_virtual = EXYNOS4_ALIGN(w,16);
+    win->var_info.yres_virtual = h * NUM_OF_WIN_BUF;
+
+    win->size = win->fix_info.line_length * h;
+
+    size = EXYNOS4_ALIGN(h,2) * EXYNOS4_ALIGN(w,16) * win->lcd_info.bits_per_pixel * 8;
+
+    for (i=0; i<NUM_OF_WIN_BUF; i++) {
+        win->secion_param[i].client = ctx->ion_hdl.client;
+
+        if (!win->secion_param[i].size)
+           createIONMem(&win->secion_param[i], size, ION_HEAP_EXYNOS_CONTIG_MASK); // Bit 23 is also active, but don't know the meaning
+
+        if (win->secion_param[i].size)
+            win->addr[i] = win->secion_param[i].physaddr;
+        else
+            win->addr[i] = NULL;
+
+        if (win->fence[i] >= 0)
+            close(win->fence[i]);
+
+        win->fence[i] = -1;
     }
 
-    if (ctx->lcd_info.yres == 0) {
-        SEC_HWC_Log(HWC_LOG_ERROR, "ATTENTION: YRES IS 0");
+    if (window_get_info(win) < 0) {
+        SEC_HWC_Log(HWC_LOG_ERROR, "%s::window_get_info is failed : %s", __func__, strerror(errno));
+        return -1;
     }
 
-    if (ctx->lcd_info.bits_per_pixel == 0) {
-        SEC_HWC_Log(HWC_LOG_ERROR, "ATTENTION: BPP IS 0");
+    win->fix_info.line_length = win->var_info.xres_virtual * win->lcd_info.bits_per_pixel * 8;
+    win->size = win->var_info.yres * win->lcd_info.bits_per_pixel * 8;
+
+    return 0;
+}
+
+int window_buffer_deallocate(struct hwc_context_t *ctx, struct hwc_win_info_t *win)
+{
+    unsigned int cur_win_addr = NULL;
+    int i = 0, fbdev1_or_hdmi_connected = 0;
+
+    if ((win != &ctx->fbdev1_win)
+#ifdef BOARD_USES_HDMI
+        || (ctx->hdmi_cable_status)
+#endif
+                                        ) {
+        fbdev1_or_hdmi_connected = 0;
+    } else {
+        if ( ioctl(ctx->fbdev1_win.fd, S3CFB_GET_CUR_WIN_BUF_ADDR, &cur_win_addr) < 0 )
+            SEC_HWC_Log(HWC_LOG_ERROR, "%s::S3CFB_GET_CUR_WIN_BUF_ADDR failed");
+
+        fbdev1_or_hdmi_connected = 1;
+    }
+
+    for (i=0; i<NUM_OF_WIN_BUF; i++) {
+        if (win->fence[i]) {
+            if (sync_wait(win->fence[i],1000) < 0)
+                SEC_HWC_Log(HWC_LOG_WARNING, "%s::sync_wait error", __func__);
+
+            close(win->fence[i]);
+            win->fence[i] = -1;
+        }
+
+        if (fbdev1_or_hdmi_connected) {
+            if ((win->secion_param[i].size > 0) && (win->buf_index != i) && (win->addr[i] != cur_win_addr))
+                destroyIONMem(&win->secion_param[i]);
+            else
+                if ((win->secion_param[i].size > 0) && (win->buf_index != -1))
+                    destroyIONMem(&win->secion_param[i]);
+        } else {
+            if (win->secion_param[i].size > 0)
+                destroyIONMem(&win->secion_param[i]);
+        }
     }
 
     return 0;
+}
+
+int get_buf_index(hwc_win_info_t *win)
+{
+    int index = 0;
+    struct s3c_fb_win_config_data config;
+
+    config.fence = 0;
+
+    if (ioctl(win->fd, S3CFB_WIN_CONFIG, &config) < 0)
+        index = (win->buf_index + 1) % NUM_OF_WIN_BUF;
+
+    return index;
+}
+
+int get_user_ptr_buf_index(hwc_win_info_t *win)
+{
+    unsigned int locked = 0, addr = 0;
+    int index = 0, i = 0;
+
+    if ( ioctl(win->fd, S3CFB_EXTDSP_GET_LOCKED_BUFFER, &locked) >= 0 && ioctl(win->fd, S3CFB_GET_FB_PHY_ADDR, &addr) >= 0 ) {
+        for( i=0; i < NUM_OF_WIN_BUF; i++ ) {
+            if ( win->addr[i] != locked )
+                if ( win->addr[i] != addr )
+                    return i;
+        }
+
+        return 0;
+    } else {
+        index = (win->buf_index + 1) % NUM_OF_WIN_BUF;
+    }
+
+    return index;
 }
 
 int fimc_v4l2_set_src(int fd, unsigned int hw_ver, s5p_fimc_img_info *src)
@@ -315,7 +482,7 @@ int fimc_v4l2_set_src(int fd, unsigned int hw_ver, s5p_fimc_img_info *src)
     fmt.fmt.pix.height      = src->full_height;
     fmt.fmt.pix.pixelformat = src->color_space;
     fmt.fmt.pix.field       = V4L2_FIELD_NONE;
-    fmt.type                = V4L2_BUF_TYPE_OUTPUT;
+    fmt.type                = V4L2_BUF_TYPE_VIDEO_OUTPUT;
 
     if (ioctl(fd, VIDIOC_S_FMT, &fmt) < 0) {
         SEC_HWC_Log(HWC_LOG_ERROR, "%s::VIDIOC_S_FMT failed : errno=%d (%s)"
@@ -324,7 +491,7 @@ int fimc_v4l2_set_src(int fd, unsigned int hw_ver, s5p_fimc_img_info *src)
     }
 
     /* crop input size */
-    crop.type = V4L2_BUF_TYPE_OUTPUT;
+    crop.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
     crop.c.width  = src->width;
     crop.c.height = src->height;
     if (0x50 <= hw_ver) {
@@ -345,7 +512,7 @@ int fimc_v4l2_set_src(int fd, unsigned int hw_ver, s5p_fimc_img_info *src)
     /* input buffer type */
     req.count       = 1;
     req.memory      = V4L2_MEMORY_USERPTR;
-    req.type        = V4L2_BUF_TYPE_OUTPUT;
+    req.type        = V4L2_BUF_TYPE_VIDEO_OUTPUT;
 
     if (ioctl(fd, VIDIOC_REQBUFS, &req) < 0) {
         SEC_HWC_Log(HWC_LOG_ERROR, "%s::Error in VIDIOC_REQBUFS", __func__);
@@ -356,7 +523,7 @@ int fimc_v4l2_set_src(int fd, unsigned int hw_ver, s5p_fimc_img_info *src)
 }
 
 int fimc_v4l2_set_dst(int fd, s5p_fimc_img_info *dst,
-        int rotation, int hflip, int vflip, unsigned int addr)
+        int rotation, int hflip, int vflip, struct fimc_buf buffer)
 {
     struct v4l2_format      sFormat;
     struct v4l2_control     vc;
@@ -404,7 +571,7 @@ int fimc_v4l2_set_dst(int fd, s5p_fimc_img_info *dst,
         return -1;
     }
 
-    fbuf.base            = (void *)addr;
+    fbuf.base            = (void *)buffer.base[0];
     fbuf.fmt.width       = dst->full_width;
     fbuf.fmt.height      = dst->full_height;
     fbuf.fmt.pixelformat = dst->color_space;
@@ -412,6 +579,15 @@ int fimc_v4l2_set_dst(int fd, s5p_fimc_img_info *dst,
     ret = ioctl(fd, VIDIOC_S_FBUF, &fbuf);
     if (ret < 0) {
         SEC_HWC_Log(HWC_LOG_ERROR, "%s::Error in video VIDIOC_S_FBUF (%d)", __func__, ret);
+        return -1;
+    }
+
+    vc.id = V4L2_CID_DST_INFO;
+    vc.value = (unsigned int) &buffer;
+
+    ret = ioctl(fd, VIDIOC_S_CTRL, &vc);
+    if (ret < 0) {
+        SEC_HWC_Log(HWC_LOG_ERROR, "%s::Error in video VIDIOC_S_CTRL - dst info (%d)", __func__, ret);
         return -1;
     }
 
@@ -431,45 +607,55 @@ int fimc_v4l2_set_dst(int fd, s5p_fimc_img_info *dst,
     return 0;
 }
 
-int fimc_v4l2_stream_on(int fd, enum v4l2_buf_type type)
-{
-    if (-1 == ioctl(fd, VIDIOC_STREAMON, &type)) {
-        SEC_HWC_Log(HWC_LOG_ERROR, "Error in VIDIOC_STREAMON\n");
-        return -1;
-    }
-
-    return 0;
-}
-
-int fimc_v4l2_queue(int fd, struct fimc_buf *fimc_buf, enum v4l2_buf_type type, int index)
+int fimc_v4l2_queue(int fd, enum v4l2_buf_type type, struct fimc_buf *fimc_buf, int index)
 {
     struct v4l2_buffer buf;
     int ret;
 
-    buf.length      = 0;
+    buf.type   = type;
+    buf.memory = V4L2_MEMORY_USERPTR;
     buf.m.userptr   = (unsigned long)fimc_buf;
-    buf.memory      = V4L2_MEMORY_USERPTR;
-    buf.index       = index;
-    buf.type        = type;
 
-    ret = ioctl(fd, VIDIOC_QBUF, &buf);
-    if (0 > ret) {
-        SEC_HWC_Log(HWC_LOG_ERROR, "Error in VIDIOC_QBUF : (%d)", ret);
+    if (type == V4L2_BUF_TYPE_VIDEO_OUTPUT) {
+        buf.index  = 0;
+        buf.length = 0;
+
+        if (ioctl(fd, VIDIOC_QBUF, &buf) < 0) {
+            SEC_HWC_Log(HWC_LOG_ERROR, "%s::Error in VIDIOC_QBUF : (%d)", __func__, ret);
+            return -1;
+        }
+    } else if (type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
+        buf.index  = index;
+
+        if (ioctl(fd, VIDIOC_QBUF, &buf) < 0) {
+            SEC_HWC_Log(HWC_LOG_ERROR, "%s::Error in VIDIOC_QBUF : (%d)", __func__, ret);
+            return -1;
+        }
+    } else {
+        SEC_HWC_Log(HWC_LOG_ERROR, "%s::Wrong type %d", __func__, type);
         return -1;
     }
 
     return 0;
 }
 
-int fimc_v4l2_dequeue(int fd, struct fimc_buf *fimc_buf, enum v4l2_buf_type type)
+int fimc_v4l2_dequeue(int fd, enum v4l2_buf_type type, struct fimc_buf *fimc_buf)
 {
-    struct v4l2_buffer          buf;
+    struct v4l2_buffer buf;
 
-    buf.memory      = V4L2_MEMORY_USERPTR;
-    buf.type        = type;
+    if ((type == V4L2_BUF_TYPE_VIDEO_OUTPUT) || (type == V4L2_BUF_TYPE_VIDEO_CAPTURE)) {
+        buf.memory = V4L2_MEMORY_USERPTR;
+        buf.type   = type;
 
-    if (-1 == ioctl(fd, VIDIOC_DQBUF, &buf)) {
-        SEC_HWC_Log(HWC_LOG_ERROR, "Error in VIDIOC_DQBUF\n");
+        if (type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
+            buf.m.userptr = (unsigned long) fimc_buf;
+
+        if (ioctl(fd, VIDIOC_DQBUF, &buf) < 0) {
+            SEC_HWC_Log(HWC_LOG_ERROR, "%s::Error in VIDIOC_DQBUF", __func__);
+            return -1;
+        }
+    } else {
+        SEC_HWC_Log(HWC_LOG_ERROR, "%s::Wrong type %d", __func__, type);
         return -1;
     }
 
@@ -478,8 +664,18 @@ int fimc_v4l2_dequeue(int fd, struct fimc_buf *fimc_buf, enum v4l2_buf_type type
 
 int fimc_v4l2_stream_off(int fd, enum v4l2_buf_type type)
 {
-    if (-1 == ioctl(fd, VIDIOC_STREAMOFF, &type)) {
+    if (ioctl(fd, VIDIOC_STREAMOFF, &type) < 0) {
         SEC_HWC_Log(HWC_LOG_ERROR, "Error in VIDIOC_STREAMOFF\n");
+        return -1;
+    }
+
+    return 0;
+}
+
+int fimc_v4l2_stream_on(int fd, enum v4l2_buf_type type)
+{
+    if (ioctl(fd, VIDIOC_STREAMON, &type) < 0) {
+        SEC_HWC_Log(HWC_LOG_ERROR, "Error in VIDIOC_STREAMON\n");
         return -1;
     }
 
@@ -490,60 +686,53 @@ int fimc_v4l2_clr_buf(int fd, enum v4l2_buf_type type)
 {
     struct v4l2_requestbuffers req;
 
-    req.count   = 0;
-    req.memory  = V4L2_MEMORY_USERPTR;
-    req.type    = type;
+    if ((type == V4L2_BUF_TYPE_VIDEO_OUTPUT) || (type == V4L2_BUF_TYPE_VIDEO_CAPTURE)) {
+        req.count  = 0;
+        req.memory = V4L2_MEMORY_USERPTR;
+        req.type   = type;
 
-    if (ioctl(fd, VIDIOC_REQBUFS, &req) == -1) {
-        SEC_HWC_Log(HWC_LOG_ERROR, "Error in VIDIOC_REQBUFS");
-    }
-
-    return 0;
-}
-
-int fimc_v4l2_S_ctrl(int fd)
-{
-    struct v4l2_control vc;
-
-    vc.id = V4L2_CID_CACHEABLE;
-    vc.value = 1;
-
-    if (ioctl(fd, VIDIOC_S_CTRL, &vc) < 0) {
-        SEC_HWC_Log(HWC_LOG_ERROR, "Error in VIDIOC_S_CTRL");
+        if (ioctl(fd, VIDIOC_REQBUFS, &req) < 0) {
+            SEC_HWC_Log(HWC_LOG_ERROR, "Error in VIDIOC_REQBUFS");
+        }
+    } else {
+        SEC_HWC_Log(HWC_LOG_ERROR, "%s::Wrong type %d", __func__, type);
         return -1;
     }
 
     return 0;
 }
 
+/* This function is called by a function not called at all, so there is no need to implement it
+int fimc_poll(struct pollfd *fds)
+{
+    int rc = 0;
+
+    rc = poll(fds, 1, 50000000);
+    if ( rc >= 0 )
+    {
+        if ( !rc ) {
+            SEC_HWC_Log(HWC_LOG_ERROR, "%s::No data in 5 seconds", __func__);
+            return rc;
+        }
+    } else if (errno != EINTR ) {
+        SEC_HWC_Log(HWC_LOG_ERROR, "%s::Poll error", __func__);
+        return rc;
+    }
+
+    return rc;
+} */
+
 int fimc_handle_oneshot(int fd, struct fimc_buf *fimc_src_buf, struct fimc_buf *fimc_dst_buf)
 {
-#ifdef CHECK_FPS
-    check_fps();
-#endif
-
-    if (fimc_v4l2_stream_on(fd, V4L2_BUF_TYPE_OUTPUT) < 0) {
+    if (fimc_v4l2_stream_on(fd, V4L2_BUF_TYPE_VIDEO_OUTPUT) < 0) {
         SEC_HWC_Log(HWC_LOG_ERROR, "Fail : SRC v4l2_stream_on()");
-        return -5;
+        return -1;
     }
 
-    if (fimc_v4l2_queue(fd, fimc_src_buf, V4L2_BUF_TYPE_OUTPUT, 0) < 0) {
+    if (fimc_v4l2_queue(fd, V4L2_BUF_TYPE_VIDEO_OUTPUT, fimc_src_buf, 0) < 0) {
         SEC_HWC_Log(HWC_LOG_ERROR, "Fail : SRC v4l2_queue()");
-        goto STREAM_OFF;
     }
-    if (fimc_v4l2_dequeue(fd, fimc_src_buf, V4L2_BUF_TYPE_OUTPUT) < 0) {
-        SEC_HWC_Log(HWC_LOG_ERROR, "Fail : SRC v4l2_dequeue()");
-        return -6;
-    }
-STREAM_OFF:
-    if (fimc_v4l2_stream_off(fd, V4L2_BUF_TYPE_OUTPUT) < 0) {
-        SEC_HWC_Log(HWC_LOG_ERROR, "Fail : SRC  v4l2_stream_off()");
-        return -8;
-    }
-    if (fimc_v4l2_clr_buf(fd, V4L2_BUF_TYPE_OUTPUT) < 0) {
-        SEC_HWC_Log(HWC_LOG_ERROR, "Fail : SRC v4l2_clr_buf()");
-        return -10;
-    }
+
     return 0;
 }
 
@@ -647,6 +836,18 @@ static int memcpy_rect(void *dst, void *src, int fullW, int fullH, int realW, in
 }
 
 /*****************************************************************************/
+static int get_dst_phys_addr(struct hwc_context_t *ctx,
+        sec_img *dst_img, sec_rect *dst_rect)
+{
+    s5p_fimc_t *fimc = &ctx->fimc;
+
+    fimc->params.dst.buf_addr_phy_rgb_y = dst_img->paddr;
+    fimc->params.dst.buf_addr_phy_cb = dst_img->paddr + dst_img->uoffset;
+    fimc->params.dst.buf_addr_phy_cr = dst_img->paddr + dst_img->uoffset + dst_img->voffset;
+
+    return dst_img->base;
+}
+
 static int get_src_phys_addr(struct hwc_context_t *ctx,
         sec_img *src_img, sec_rect *src_rect)
 {
@@ -659,7 +860,7 @@ static int get_src_phys_addr(struct hwc_context_t *ctx,
     ADDRS * addr;
 
     // error check routine
-    if (0 == src_img->base && !(src_img->usage & GRALLOC_USAGE_HW_FIMC1)) {
+    if (0 == src_img->base && !(src_img->usage & GRALLOC_USAGE_HW_ION)) {
         SEC_HWC_Log(HWC_LOG_ERROR, "%s invalid src image base\n", __func__);
         return 0;
     }
@@ -672,11 +873,11 @@ static int get_src_phys_addr(struct hwc_context_t *ctx,
     case HWC_VIRT_MEM_TYPE:
     case HWC_UNKNOWN_MEM_TYPE:
         switch (src_img->format) {
-        case HAL_PIXEL_FORMAT_CUSTOM_YCbCr_420_SP:
-        case HAL_PIXEL_FORMAT_CUSTOM_YCrCb_420_SP:
-        case HAL_PIXEL_FORMAT_CUSTOM_YCbCr_420_SP_TILED:
-        case HAL_PIXEL_FORMAT_CUSTOM_YCbCr_422_SP:
-        case HAL_PIXEL_FORMAT_CUSTOM_YCrCb_422_SP:
+        case HAL_PIXEL_FORMAT_CUSTOM_YCbCr_420_SP: //0x110
+        case HAL_PIXEL_FORMAT_CUSTOM_YCrCb_420_SP: //0x111
+        case HAL_PIXEL_FORMAT_CUSTOM_YCbCr_420_SP_TILED: //0x112
+        case HAL_PIXEL_FORMAT_CUSTOM_YCbCr_422_SP: //0x113
+        case HAL_PIXEL_FORMAT_CUSTOM_YCrCb_422_SP: //0x114
             addr = (ADDRS *)(src_img->base);
             fimc->params.src.buf_addr_phy_rgb_y = addr->addr_y;
             fimc->params.src.buf_addr_phy_cb    = addr->addr_cbcr;
@@ -691,10 +892,10 @@ static int get_src_phys_addr(struct hwc_context_t *ctx,
                 return 0;
             }
             break;
-        case HAL_PIXEL_FORMAT_CUSTOM_YCbCr_422_I:
-        case HAL_PIXEL_FORMAT_CUSTOM_YCrCb_422_I:
-        case HAL_PIXEL_FORMAT_CUSTOM_CbYCrY_422_I:
-        case HAL_PIXEL_FORMAT_CUSTOM_CrYCbY_422_I:
+        case HAL_PIXEL_FORMAT_CUSTOM_YCbCr_422_I: //0x115
+        case HAL_PIXEL_FORMAT_CUSTOM_YCrCb_422_I: //0x117
+        case HAL_PIXEL_FORMAT_CUSTOM_CbYCrY_422_I: //0x117
+        case HAL_PIXEL_FORMAT_CUSTOM_CrYCbY_422_I: //0x118
             addr = (ADDRS *)(src_img->base + src_img->offset);
             fimc->params.src.buf_addr_phy_rgb_y = addr->addr_y;
             src_phys_addr = fimc->params.src.buf_addr_phy_rgb_y;
@@ -706,7 +907,7 @@ static int get_src_phys_addr(struct hwc_context_t *ctx,
             }
             break;
         default:
-            if (src_img->usage & GRALLOC_USAGE_HW_FIMC1) {
+            if (src_img->usage & GRALLOC_USAGE_HW_ION) {
                 fimc->params.src.buf_addr_phy_rgb_y = src_img->paddr;
                 fimc->params.src.buf_addr_phy_cb = src_img->paddr + src_img->uoffset;
                 fimc->params.src.buf_addr_phy_cr = src_img->paddr + src_img->uoffset + src_img->voffset;
@@ -721,6 +922,27 @@ static int get_src_phys_addr(struct hwc_context_t *ctx,
     }
 
     return src_phys_addr;
+}
+
+int formatValueHAL2G2D(unsigned int format, unsigned int *g2d_format,
+        unsigned int *pixel_order, unsigned int *bpp)
+{
+    //TODO
+    return 0;
+}
+
+int rotateValueHAL2G2D(unsigned char transform)
+{
+    int rotate_flag = transform & 0x7;
+
+    switch (rotate_flag) {
+    case HAL_TRANSFORM_ROT_90:  return ROT_90;
+    case HAL_TRANSFORM_ROT_180: return ROT_180;
+    case HAL_TRANSFORM_ROT_270: return ROT_270;
+    case HAL_TRANSFORM_FLIP_H | HAL_TRANSFORM_ROT_90: return ORIGIN;
+    case HAL_TRANSFORM_FLIP_V | HAL_TRANSFORM_ROT_90: return ORIGIN;
+    default: return ORIGIN;
+    }
 }
 
 static inline int rotateValueHAL2PP(unsigned char transform)
@@ -873,6 +1095,7 @@ static inline int heightOfPP(int pp_color_format, int number)
     case V4L2_PIX_FMT_NV12:
     case V4L2_PIX_FMT_NV12T:
     case V4L2_PIX_FMT_YUV420:
+    case V4L2_PIX_FMT_YVU420:
         return multipleOf2(number);
 
     default :
@@ -916,6 +1139,192 @@ static unsigned int get_yuv_planes(unsigned int fmt)
         return yuv_list[sel].planes;
 }
 
+void sub_29B4(struct hwc_win_info_t *win0, struct hwc_win_info_t *win1, sec_img *src_img, sec_img *dst_img,
+                sec_rect *src_rect, sec_rect *dst_rect, int rotation)
+{
+	unsigned int yresrel = 0;
+
+    v7 = a4;
+    v8 = a1;
+    v9 = a2;
+
+    src_img->f_w = win0->lcd_info.xres;
+    src_img->f_h = win0->lcd_info.yres;
+    src_img->w = win0->var_info.xres;
+    src_img->h = win0->var_info.yres;
+
+    src_img->base = 0;
+    src_img->offset = 0;
+    src_img->mem_id = 0;
+
+    src_img->usage = 0;
+    src_img->uoffset = 0;
+    src_img->paddr = win0->addr[win0->buf_index];
+    src_img->voffset = 0;
+    src_img->mem_type = HWC_PHYS_MEM_TYPE;
+
+    src_rect->x = 0;
+    src_rect->y = 0;
+    src_rect->w = win0->var_info.xres;
+    src_rect->h = win0->var_info.yres;
+
+    yresrel = win1->lcd_info->yres / win0->lcd_info->yres;
+
+    //TODO: find constants for these rotation literals
+    switch(rotation) {
+    case 0:
+        /*v14 = win0->lcd_info->xres * win1->lcd_info->yres / win0->lcd_info->yres;
+
+        dst_rect->x = (win0->rect_info.x * v14 / win0->lcd_info->xres)
+                       + ((win0->lcd_info.xres - v14) / 2);
+    	v15 = win0->rect_info.y * win1->lcd_info->yres / win0->lcd_info->yres;
+        v14 = win0->lcd_info->xres * yresrel;
+        dst_rect->w = win0->var_info.xres * v14 / win0->lcd_info.xres;*/
+
+    	dst_rect->x = (win0->rect_info.x * yresrel)
+    	               + ((win0->lcd_info.xres - (win0->lcd_info->xres * yresrel)) / 2);
+    	dst_rect->y = win0->rect_info.y * yresrel;
+    	dst_rect->w = win0->var_info.xres * yresrel;
+        dst_rect->h = win0->var_info.yres * yresrel;
+
+        dst_img->f_w = win1->var_info.xres;
+        dst_img->f_h = win1->var_info.yres;
+        dst_img->w = dst_rect->w;
+        dst_img->h = dst_rect->h;
+        break;
+
+    case 3u: //HAL_TRANSFORM_ROT_90 or ROT_270 (from sec_g2d_4x.h) ????
+        /*v18 = win0->lcd_info.xres * win1->lcd_info.yres / win0->lcd_info.yres;
+        dst_rect->x = v18 + ((win1->lcd_info.xres - v18) / 2)
+                      - (v18 * (win0->rect_info.x + win0->var_info.xres) / win0->lcd_info.xres);
+        dst_rect->y = win1->lcd_info.yres
+                      - ( (win1->lcd_info.yres * (win0->var_info.yres + win0->rect_info.y))
+                          / win0->lcd_info.yres);
+        dst_rect->w = win0->var_info.xres * v18 / win0->lcd_info.xres;
+        dst_rect->h = win0->var_info.yres * win1->lcd_info.yres / win0->lcd_info.yres;*/
+
+        v18 = win0->lcd_info.xres * yresrel;
+        dst_rect->x = v18 + ((win1->lcd_info.xres - v18) / 2)
+    	                      - (v18 * (win0->rect_info.x + win0->var_info.xres) / win0->lcd_info.xres);
+        dst_rect->y = win1->lcd_info.yres
+                      - ( (win1->lcd_info.yres * (win0->var_info.yres + win0->rect_info.y))
+                          / win0->lcd_info.yres);
+        dst_rect->w = win0->var_info.xres * v18 / win0->lcd_info.xres;
+        dst_rect->h = win0->var_info.yres * win1->lcd_info.yres / win0->lcd_info.yres;
+
+        dst_img->f_w = win1->var_info.xres;
+        dst_img->f_h = win1->var_info.yres;
+        dst_img->w = dst_rect->w;
+        dst_img->h = dst_rect->h;
+        break;
+
+    case 4u:
+        if (win0->lcd_info.yres * win1->lcd_info.yres >= win0->lcd_info.xres * win1->lcd_info.xres) {
+            v18 = win1->lcd_info.xres;
+            v17 = win0->lcd_info.xres * win1->lcd_info.xres / win0->lcd_info.yres; //r9
+            v25 = (win1->lcd_info.yres - v17) / 2; //r3
+        } else {
+            v25 = 0; //r3
+            v17 = win0->lcd_info.xres; //r9
+            v18 = win0->lcd_info.yres * win1->lcd_info.yres / win0->lcd_info.xres;//r8
+        }
+
+        dst_rect->x = v18 + ((win1->lcd_info.xres - v18) / 2)
+                      - ( (win0->rect_info.x + win0->var_info.xres) * v18 / win0->lcd_info.xres);
+
+        dst_rect->y = (win0->rect_info.y * v17 / win0->lcd_info.yres) + v25;
+        dst_rect->w = win0->var_info.xres * v18 / win0->lcd_info.xres;
+        dst_rect->h = win0->var_info.yres * v17 / win0->lcd_info.yres
+
+        dst_img->f_w = win1->var_info.xres;
+        dst_img->f_h = win1->var_info.yres;
+        dst_img->w = dst_rect->w;
+        dst_img->h = dst_rect->h;
+        break;
+
+    case 7u:
+        if (win0->lcd_info->yres * win1->lcd_info->yres >= win0->lcd_info->xres * win1->lcd_info->xres) {
+            v14 = win1->lcd_info->xres; //r9
+            v34 = 0; //r2
+            v13 = win0->lcd_info->xres * win1->lcd_info->xres / win0->lcd_info->yres; //r8
+            v33 = (win1->lcd_info->yres - v13) / 2; //r11
+        } else {
+            v13 = win1->lcd_info->xres;
+            v33 = 0;
+            v14 = win0->lcd_info->yres * win1->lcd_info->yres / win0->lcd_info->xres;
+            v34 = (win1->lcd_info->xres - (v14)) / 2;
+        }
+
+        dst_rect->x = (win0->rect_info.x * v14 / win0->lcd_info->xres) + v34;
+                v15 = *(_DWORD *)(v8 + 0x1C) * v13 / *(_DWORD *)(v8 + 0x184) + v33;
+LABEL_14:
+                dst_rect->y = v15;
+                v7 = win1->var_info.xres;
+                dst_img->f_h = win1->var_info.yres;
+
+                dst_rect->w =
+                dst_img->w = win0->var_info.xres * v14 / win0->lcd_info.xres;
+
+                v27 = win0->var_info.yres * v13;
+LABEL_15:
+
+                dst_rect->h =
+                dst_img->h = v27 / win0->lcd_info.yres;
+                break;
+            default:
+                break;
+        }
+
+    dst_img->format = HAL_PIXEL_FORMAT_CUSTOM_YCbCr_420_SP;
+    dst_img->base = 0;
+    dst_img->offset = 0;
+    dst_img->mem_id = 0;
+    dst_img->uoffset = EXYNOS4_ALIGN( EXYNOS4_ALIGN(dst_img->f_w, 16) * EXYNOS4_ALIGN(dst_img->f_h, 16), 8192);
+    dst_img->mem_type = HWC_PHYS_MEM_TYPE;
+    dst_img->paddr = win1->addr[win1->buf_index];
+}
+
+void rect_from_layer_get(struct hwc_context_t *ctx, hwc_layer_1_t *cur, int *left, int *top, int *right, int *bottom)
+{
+    *left = cur->displayFrame.left;
+    *top = cur->displayFrame.top;
+    *right = cur->displayFrame.right - cur->displayFrame.left;
+    *bottom = cur->displayFrame.bottom - cur->displayFrame.top;
+
+    if (cur->displayFrame.left < 0) {
+        *left = 0;
+        *right += cur->displayFrame.left;
+    }
+
+    if (cur->displayFrame.right > ctx->hdmi_xres)
+        *right -= cur->displayFrame.right - ctx->hdmi_xres;
+
+    if (cur->displayFrame.top < 0) {
+        *top = 0;
+        *bottom += cur->displayFrame.top;
+    }
+
+    if (cur->displayFrame.bottom > ctx->hdmi_yres)
+        *bottom -= cur->displayFrame.bottom - ctx->hdmi_yres;
+}
+
+int waiting_fimc_csc(int fd)
+{
+    int result;
+
+    if ( fimc_v4l2_dequeue(fd, V4L2_BUF_TYPE_VIDEO_OUTPUT, NULL) < 0 )
+        SEC_HWC_Log(HWC_LOG_WARNING, "%s fimc_v4l2_dequeue() error", __func__);
+
+    if ( fimc_v4l2_stream_off(fd, V4L2_BUF_TYPE_VIDEO_OUTPUT) >= 0 )
+        result = 0;
+    else {
+        SEC_HWC_Log(HWC_LOG_ERROR, "%s fimc_v4l2_stream_off()", __func__);
+        result = -1;
+    }
+    result = rotateValueHAL2G2D(result);
+    return result;
+}
+
 static int runFimcCore(struct hwc_context_t *ctx,
         unsigned int src_phys_addr, sec_img *src_img, sec_rect *src_rect,
         uint32_t src_color_space,
@@ -924,6 +1333,7 @@ static int runFimcCore(struct hwc_context_t *ctx,
 {
     s5p_fimc_t        * fimc = &ctx->fimc;
     s5p_fimc_params_t * params = &(fimc->params);
+    struct fimc_buf fimc_dst_buf;
 
     struct fimc_buf fimc_src_buf;
     int src_bpp, src_planes;
@@ -948,7 +1358,7 @@ static int runFimcCore(struct hwc_context_t *ctx,
     params->src.buf_addr_phy_rgb_y = src_phys_addr;
 
     /* check src minimum */
-    if (src_rect->w < 16 || src_rect->h < 8) {
+    if (multipleOf2(src_rect->w) || src_rect->w < 16 || src_rect->h < 8) {
         SEC_HWC_Log(HWC_LOG_ERROR,
                 "%s src size is not supported by fimc : f_w=%d f_h=%d "
                 "x=%d y=%d w=%d h=%d (ow=%d oh=%d) format=0x%x", __func__,
@@ -1065,7 +1475,16 @@ static int runFimcCore(struct hwc_context_t *ctx,
      *   - set buffer type (V4L2_MEMORY_USERPTR)
      */
 
-    if (fimc_v4l2_set_dst(fimc->dev_fd, &params->dst, rotate_value, hflip, vflip, dst_phys_addr) < 0) {
+    /* TODO: in blob, they use a strange structure, so we'll use struct fimc_buf instead.
+     * Later on we have to guess where are the addresses coming from. This is just to fix
+     * the building process. */
+    memset(&fimc_dst_buf, 0, sizeof(struct fimc_buf));
+
+    fimc_dst_buf.base[0] = dst_phys_addr;
+    //TODO fimc_dst_buf.base[1] =
+    //TODO fimc_dst_buf.base[2] =
+
+    if (fimc_v4l2_set_dst(fimc->dev_fd, &params->dst, rotate_value, hflip, vflip, fimc_dst_buf) < 0) {
         SEC_HWC_Log(HWC_LOG_ERROR, "fimc_v4l2_set_dst is failed\n");
         return -1;
     }
@@ -1106,7 +1525,7 @@ static int runFimcCore(struct hwc_context_t *ctx,
             src_cbcr_order = false;
         }
 
-        if (src_img->usage & GRALLOC_USAGE_HW_FIMC1) {
+        if (src_img->usage & GRALLOC_USAGE_HW_ION) {
             fimc_src_buf.base[0] = params->src.buf_addr_phy_rgb_y;
             if (src_cbcr_order == true) {
                 fimc_src_buf.base[1] = params->src.buf_addr_phy_cb;
@@ -1127,12 +1546,57 @@ static int runFimcCore(struct hwc_context_t *ctx,
      *    - stream on => queue => dequeue => stream off => clear buf
      */
     if (fimc_handle_oneshot(fimc->dev_fd, &fimc_src_buf, NULL) < 0) {
-        ALOGE("fimcrun fail");            
-        fimc_v4l2_clr_buf(fimc->dev_fd, V4L2_BUF_TYPE_OUTPUT);
+        ALOGE("fimcrun fail");
+        fimc_v4l2_clr_buf(fimc->dev_fd, V4L2_BUF_TYPE_VIDEO_OUTPUT);
         return -1;
     }
 
     return 0;
+}
+
+void clearBufferbyFimc(struct hwc_context_t *ctx, sec_img *dst_img)
+{
+    sec_img  src_img;
+    sec_rect src_rect, dst_rect;
+    int32_t      src_color_space;
+    unsigned int dst_phys_addr  = 0;
+    int32_t      dst_color_space;
+    int          rc = 0;
+
+    memset(&src_img, 0, sizeof(sec_img));
+
+    src_img.f_w =
+    src_img.f_h =
+    src_img.w =
+    src_img.h = 64;
+    src_img.mem_type = HWC_PHYS_MEM_TYPE;
+    src_img.format = HAL_PIXEL_FORMAT_RGB_565;
+    //src_img.paddr = str1680.phys_addr;
+
+    src_rect.x = 0;
+    src_rect.y = 0;
+    src_rect.w = 64;
+    src_rect.h = 64;
+
+    src_color_space = HAL_PIXEL_FORMAT_2_V4L2_PIX(src_img.format);
+
+    dst_rect.x = 0;
+    dst_rect.y = 0;
+    dst_rect.w = dst_img->f_w;
+    dst_rect.h = dst_img->f_h;
+
+    dst_color_space = HAL_PIXEL_FORMAT_2_V4L2_PIX(dst_img->format);
+
+    dst_phys_addr = get_dst_phys_addr(ctx, dst_img, &dst_rect);
+
+    /* 4. FIMC: src_rect of src_img => dst_rect of dst_img */
+    rc = runFimcCore(ctx, src_img.paddr, &src_img, &src_rect,
+                (uint32_t)src_color_space, dst_phys_addr, dst_img, &dst_rect,
+                (uint32_t)dst_color_space, 0);
+    if (rc < 0)
+        SEC_HWC_Log(HWC_LOG_ERROR, "%s rc=%d", __func__, rc);
+
+    waiting_fimc_csc(ctx->fimc.dev_fd);
 }
 
 int createFimc(s5p_fimc_t *fimc)
@@ -1170,7 +1634,7 @@ int createFimc(s5p_fimc_t *fimc)
     /*
      * malloc fimc_outinfo structure
      */
-    fmt.type = V4L2_BUF_TYPE_OUTPUT;
+    fmt.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
     if (ioctl(fimc->dev_fd, VIDIOC_G_FMT, &fmt) < 0) {
         SEC_HWC_Log(HWC_LOG_ERROR, "%s::Error in video VIDIOC_G_FMT", __func__);
         goto err;
@@ -1184,6 +1648,14 @@ int createFimc(s5p_fimc_t *fimc)
         goto err;
     }
     fimc->hw_ver = vc.value;
+
+    vc.id = V4L2_CID_OVLY_MODE;
+    vc.value = FIMC_OVLY_NONE_MULTI_BUF;
+
+    if (ioctl(fimc->dev_fd, VIDIOC_S_CTRL, &vc) < 0) {
+        SEC_HWC_Log(HWC_LOG_ERROR, "%s::Error in video VIDIOC_S_CTRL", __func__);
+        goto err;
+    }
 
     return 0;
 
@@ -1229,7 +1701,7 @@ int runFimc(struct hwc_context_t *ctx,
         return -1;
 
     /* 2. destination address and size */
-    dst_phys_addr = dst_img->base;
+    dst_phys_addr = get_dst_phys_addr(ctx, dst_img, dst_rect);;
     if (0 == dst_phys_addr)
         return -2;
 
@@ -1275,5 +1747,167 @@ int check_yuv_format(unsigned int color_format) {
         return 1;
     default:
         return 0;
+    }
+}
+
+int is_s3d_color_format(int format, int *hal_format, unsigned int *bpp)
+{
+    int result = 0;
+
+    switch(format) {
+      case 0x200:
+        *hal_format = HAL_PIXEL_FORMAT_YCbCr_420_SP_TILED;
+        *bpp = 1;
+        result = 1;
+        break;
+
+      case 0x201:
+        *hal_format = HAL_PIXEL_FORMAT_YCbCr_420_SP_TILED;
+        *bpp = 2;
+        result = 1;
+        break;
+
+      case 0x202:
+        *hal_format = HAL_PIXEL_FORMAT_YCbCr_420_SP_TILED;
+        *bpp = 3;
+        result = 1;
+        break;
+
+      case 0x203:
+        *hal_format = HAL_PIXEL_FORMAT_YCbCr_420_SP_TILED;
+        *bpp = 4;
+        result = 1;
+        break;
+
+      case 0x204:
+        *hal_format = HAL_PIXEL_FORMAT_YCbCr_420_SP;
+        *bpp = 1;
+        result = 1;
+        break;
+
+      case 0x205:
+        *hal_format = HAL_PIXEL_FORMAT_YCbCr_420_SP;
+        *bpp = 2;
+        result = 1;
+        break;
+
+      case 0x206:
+        *hal_format = HAL_PIXEL_FORMAT_YCbCr_420_SP;
+        *bpp = 3;
+        result = 1;
+        break;
+
+      case 0x207:
+        *hal_format = HAL_PIXEL_FORMAT_YCbCr_420_SP;
+        *bpp = 4;
+        result = 1;
+        break;
+
+      case 0x208:
+        *hal_format = HAL_PIXEL_FORMAT_YCbCr_420_P;
+        *bpp = 1;
+        result = 1;
+        break;
+
+      case 0x209:
+        *hal_format = HAL_PIXEL_FORMAT_YCbCr_420_P;
+        *bpp = 2;
+        result = 1;
+        break;
+
+      case 0x210:
+        *hal_format = HAL_PIXEL_FORMAT_YCbCr_420_P;
+        *bpp = 3;
+        result = 1;
+        break;
+
+      case 0x211:
+        *hal_format = HAL_PIXEL_FORMAT_YCbCr_420_P;
+        *bpp = 4;
+        result = 1;
+        break;
+
+      case 0x212:
+        *hal_format = HAL_PIXEL_FORMAT_YCrCb_420_SP;
+        *bpp = 1;
+        result = 1;
+        break;
+
+      case 0x213:
+        *hal_format = HAL_PIXEL_FORMAT_YCrCb_420_SP;
+        *bpp = 2;
+        result = 1;
+        break;
+
+      case 0x214:
+        *hal_format = HAL_PIXEL_FORMAT_YCrCb_420_SP;
+        *bpp = 3;
+        result = 1;
+        break;
+
+      case 0x215:
+        *hal_format = HAL_PIXEL_FORMAT_YCrCb_420_SP;
+        *bpp = 4;
+        result = 1;
+        break;
+
+      default:
+          *hal_format = format;
+          *bpp = 0;
+          result = 0;
+    }
+
+    return result;
+}
+
+uint8_t exynos4_format_to_bpp(int format)
+{
+    switch (format) {
+    case HAL_PIXEL_FORMAT_RGBA_8888:
+    case HAL_PIXEL_FORMAT_RGBX_8888:
+    case HAL_PIXEL_FORMAT_BGRA_8888:
+        return 32;
+
+    case HAL_PIXEL_FORMAT_RGB_888:
+        return 24;
+
+    case HAL_PIXEL_FORMAT_RGB_565:
+        return 16;
+
+    default:
+        ALOGW("unrecognized pixel format %u", format);
+        return 0;
+    }
+}
+
+enum s3c_fb_pixel_format exynos4_format_to_s3c_format(int format)
+{
+    switch (format) {
+    case HAL_PIXEL_FORMAT_RGBA_8888:
+        return S3C_FB_PIXEL_FORMAT_RGBA_8888;
+    case HAL_PIXEL_FORMAT_RGBX_8888:
+        return S3C_FB_PIXEL_FORMAT_RGBX_8888;
+    case HAL_PIXEL_FORMAT_RGB_888:
+        return S3C_FB_PIXEL_FORMAT_RGB_888;
+    case HAL_PIXEL_FORMAT_RGB_565:
+        return S3C_FB_PIXEL_FORMAT_RGB_565;
+    case HAL_PIXEL_FORMAT_BGRA_8888:
+        return S3C_FB_PIXEL_FORMAT_BGRA_8888;
+    default:
+        return S3C_FB_PIXEL_FORMAT_MAX;
+    }
+}
+
+enum s3c_fb_blending exynos4_blending_to_s3c_blending(int32_t blending)
+{
+    switch (blending) {
+    case HWC_BLENDING_NONE:
+        return S3C_FB_BLENDING_NONE;
+    case HWC_BLENDING_PREMULT:
+        return S3C_FB_BLENDING_PREMULT;
+    case HWC_BLENDING_COVERAGE:
+        return S3C_FB_BLENDING_COVERAGE;
+    default:
+        return S3C_FB_BLENDING_MAX;
     }
 }
