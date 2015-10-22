@@ -23,8 +23,10 @@ LOCAL_PRELINK_MODULE := false
 LOCAL_MODULE_RELATIVE_PATH := hw
 LOCAL_SHARED_LIBRARIES := liblog libEGL libcutils libhardware libutils libsync libsecion
 
-LOCAL_SRC_FILES := hwcomposer.cpp \
-                   window.cpp
+LOCAL_SRC_FILES := \
+    hwcomposer.cpp \
+    hwcomposer_vsync.cpp \
+    window.cpp
 
 LOCAL_C_INCLUDES := $(LOCAL_PATH)/../include \
                     $(TOP)/system/core/libsync/include
