@@ -15,6 +15,7 @@
  */
 
 #include "hwcomposer.h"
+#include "hwcomposer_vsync.h"
 
 /*****************************************************************************/
 
@@ -133,7 +134,7 @@ static int hwc_device_close(struct hw_device_t *dev)
     return 0;
 }
 
-static int hwc_eventControl(struct hwc_composer_device_1* dev, int dpy,
+static int hwc_eventControl(struct hwc_composer_device_1* dev, __unused int dpy,
         int event, int enabled)
 {
     int val = 0, rc = 0;
@@ -141,8 +142,16 @@ static int hwc_eventControl(struct hwc_composer_device_1* dev, int dpy,
 
     switch (event) {
     case HWC_EVENT_VSYNC:
-        ALOGD("%s HWC_EVENT_VSYNC enabled=%d", __FUNCTION__, enabled);
-        return VENDOR_CALL(dev, eventControl, dpy, event, enabled);
+        val = enabled;
+        ALOGD("%s: HWC_EVENT_VSYNC, enabled=%d", __FUNCTION__, val);
+
+        rc = ioctl(ctx->win_fb0.fd, S3CFB_SET_VSYNC_INT, &val);
+        if (rc < 0) {
+            ALOGE("%s: could not set vsync using ioctl: %s", __FUNCTION__,
+                strerror(errno));
+            return -errno;
+        }
+        return rc;
     }
     return -EINVAL;
 }
@@ -151,7 +160,7 @@ static int hwc_blank(struct hwc_composer_device_1 *dev, int dpy, int blank)
 {
     struct hwc_context_t* ctx = (struct hwc_context_t*)dev;
 
-    ALOGD("%s blank=%d", __FUNCTION__, blank);
+    ALOGD("%s: blank=%d", __FUNCTION__, blank);
 
     return VENDOR_CALL(dev, blank, dpy, blank);
 }
@@ -183,7 +192,9 @@ static void hook_invalidate(const struct hwc_procs* procs)
 {
     struct hwc_hooks_t* hooks = (struct hwc_hooks_t*)procs;
 
+#if DEBUG_SPAMMY
     ALOGD("%s", __FUNCTION__);
+#endif
 
     if (hooks && hooks->procs && hooks->procs->invalidate) {
         hooks->procs->invalidate(hooks->procs);
@@ -218,6 +229,8 @@ static void hwc_registerProcs(struct hwc_composer_device_1* dev,
     struct hwc_context_t* ctx = (struct hwc_context_t*)dev;
     ctx->procs = const_cast<hwc_procs_t *>(procs);
 
+    ALOGD("%s", __FUNCTION__);
+
     // Set up hooks and send them to vendor
     // ctx is already set to 0
     ctx->vendor_procs.hooks.invalidate = &hook_invalidate;
@@ -225,10 +238,10 @@ static void hwc_registerProcs(struct hwc_composer_device_1* dev,
     ctx->vendor_procs.hooks.hotplug = &hook_hotplug;
 
     ctx->vendor_procs.procs = ctx->procs;
-
-    ALOGD("%s before VENDOR_CALL", __FUNCTION__);
-
     VENDOR_CALL(dev, registerProcs, (hwc_procs_t *) &ctx->vendor_procs.hooks);
+
+    // after we have registered everything, start our threads
+    init_vsync_thread(ctx);
 }
 
 static int hwc_getDisplayConfigs(struct hwc_composer_device_1* dev, int disp,
@@ -399,7 +412,7 @@ static int hwc_device_open(const struct hw_module_t* module, const char* name,
         dev->win_fb0.rect_info.h = dev->lcd_info.yres;
 
         if (window_get_info(&dev->win_fb0) < 0) {
-            ALOGE("%s::window_get_info is failed : %s", __func__, strerror(errno));
+            ALOGE("%s::window_get_info has failed : %s", __func__, strerror(errno));
             status = -EINVAL;
             goto err;
         }
@@ -409,7 +422,7 @@ static int hwc_device_open(const struct hw_module_t* module, const char* name,
 
         dev->win_fb0.buf_index = 0;
 
-        for(i = 0; i < NUM_OF_WIN_BUF; i++) {
+        for (i = 0; i < NUM_OF_WIN_BUF; i++) {
             dev->win_fb0.addr[i] = dev->win_fb0.fix_info.smem_start + (dev->win_fb0.size * i);
             ALOGE("%s:: win-%d addr[%d] = 0x%x\n", __func__, 2, i, dev->win_fb0.addr[i]);
         }

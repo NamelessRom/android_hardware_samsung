@@ -22,6 +22,7 @@
 #include "s3c_lcd.h"
 #include "secion.h"
 
+#include "hwcomposer_utils.h"
 #include "window.h"
 
 #ifndef _VSYNC_PERIOD
@@ -31,13 +32,6 @@
 const size_t NUM_HW_WINDOWS = 5;
 const size_t NO_FB_NEEDED = NUM_HW_WINDOWS + 1;
 const size_t NUM_OF_WIN_BUF = 3;
-
-#define DEBUG 1
-
-#ifdef ALOGD
-#undef ALOGD
-#endif
-#define ALOGD(...) if (DEBUG) ((void)ALOG(LOG_DEBUG, LOG_TAG, __VA_ARGS__))
 
 #define EXYNOS4_ALIGN( value, base ) (((value) + ((base) - 1)) & ~((base) - 1))
 

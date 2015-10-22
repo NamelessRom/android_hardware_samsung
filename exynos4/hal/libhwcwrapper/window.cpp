@@ -89,6 +89,17 @@ int window_open(struct hwc_win_info_t *win, int id)
         goto error;
     }
 
+    // enable vsync
+    if (ioctl(win->fd, S3CFB_SET_VSYNC_INT, &vsync) < 0) {
+        ALOGE("%s::S3CFB_SET_VSYNC_INT failed", __func__);
+        goto error;
+    }
+#if DEBUG_VSYNC
+    else {
+        ALOGD("%s: enabled vsync", __func__);
+    }
+#endif
+
     return 0;
 
 error:
@@ -102,8 +113,19 @@ error:
 int window_close(struct hwc_win_info_t *win)
 {
     int ret = 0;
+    int vsync = 0;
 
     if (0 < win->fd) {
+        // disable vsync
+        if (ioctl(win->fd, S3CFB_SET_VSYNC_INT, &vsync) < 0) {
+            ALOGE("%s::S3CFB_SET_VSYNC_INT failed", __func__);
+        }
+#if DEBUG_VSYNC
+    else {
+        ALOGD("%s: disabled vsync", __func__);
+    }
+#endif
+
         ret = close(win->fd);
     }
     win->fd = 0;
