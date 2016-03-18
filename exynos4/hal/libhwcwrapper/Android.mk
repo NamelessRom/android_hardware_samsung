@@ -21,10 +21,13 @@ include $(CLEAR_VARS)
 
 LOCAL_PRELINK_MODULE := false
 LOCAL_MODULE_RELATIVE_PATH := hw
-LOCAL_SHARED_LIBRARIES := liblog libEGL libcutils libhardware libutils libsync libsecion
+LOCAL_SHARED_LIBRARIES := liblog libEGL libcutils libhardware libutils libsync libsecion libfimg
 
 LOCAL_SRC_FILES := hwcomposer.cpp \
-                   window.cpp
+                   hwcomposer_vsync.cpp \
+                   window.cpp \
+                   utils.cpp \
+                   v4l2.cpp
 
 LOCAL_C_INCLUDES := $(LOCAL_PATH)/../include \
                     $(TOP)/system/core/libsync/include
