@@ -27,7 +27,7 @@ endif
 
 #rild
 ifeq ($(BOARD_PROVIDES_RILD),true)
-ifneq ($(filter xmm6260 xmm6262 xmm6360 xmm7260,$(BOARD_MODEM_TYPE)),)
+ifneq ($(filter xmm6260 xmm6262 xmm6360 xmm7260 ss333,$(BOARD_MODEM_TYPE)),)
 include $(RIL_PATH)/rild/Android.mk
 endif
 endif
