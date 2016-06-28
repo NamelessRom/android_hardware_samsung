@@ -243,6 +243,10 @@ static size_t s_lastNITZTimeDataSize;
     static char printBuf[PRINTBUF_SIZE];
 #endif
 
+#ifdef SAMSUNG_NEXT_GEN_MODEM
+    static unsigned int s_samsung_first_nextgen_index = 0;
+#endif
+
 /*******************************************************************/
 static int sendResponse (Parcel &p, RIL_SOCKET_ID socket_id);
 
@@ -4439,6 +4443,14 @@ RIL_register (const RIL_RadioFunctions *callbacks) {
     int ret;
     int flags;
 
+#ifdef SAMSUNG_NEXT_GEN_MODEM
+    for (int i = (int)NUM_ELEMS(s_unsolResponses_v)-1; i>0; i--) {
+        if (s_unsolResponses_v[i].requestNumber == SAMSUNG_UNSOL_RESPONSE_BASE_NEXT_GEN) {
+            s_samsung_first_nextgen_index = i;
+        }
+    }
+#endif
+
     RLOGI("SIM_COUNT: %d", SIM_COUNT);
 
     if (callbacks == NULL) {
@@ -4929,6 +4941,17 @@ void RIL_onUnsolicitedResponse(int unsolResponse, const void *data,
     }
 
     /* Hack to include Samsung responses */
+#ifdef SAMSUNG_NEXT_GEN_MODEM
+    if (unsolResponse > SAMSUNG_UNSOL_RESPONSE_BASE_NEXT_GEN) {
+        /* Next gen responses */
+        int index = unsolResponse - SAMSUNG_UNSOL_RESPONSE_BASE_NEXT_GEN + s_samsung_first_nextgen_index;
+
+        RLOGD("SAMSUNG: unsolResponse=%d, unsolResponseIndex=%d", unsolResponse, index);
+
+        if (index < (int32_t)NUM_ELEMS(s_unsolResponses_v))
+            pRI = &s_unsolResponses_v[index];
+    } else
+#endif
     if (unsolResponse > RIL_VENDOR_COMMANDS_OFFSET + RIL_UNSOL_RESPONSE_BASE) {
         int index = unsolResponse - RIL_VENDOR_COMMANDS_OFFSET - RIL_UNSOL_RESPONSE_BASE;
 
