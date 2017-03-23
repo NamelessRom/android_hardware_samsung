@@ -1,4 +1,7 @@
-# Copyright (C) 2008 The Android Open Source Project
+# Copyright (C) 2010 Samsung Electronics Co.,LTD., for the ODROID code
+# Copyright (C) 2012 The Android Open Source Project, for the samsung_slsi/exynos5 code
+# Copyright (C) 2013 Paul Kocialkowski, for the V4L2 code
+# Copyright (C) 2017 The NamelessRom Project, for making it work
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,10 +24,13 @@ include $(CLEAR_VARS)
 
 LOCAL_PRELINK_MODULE := false
 LOCAL_MODULE_RELATIVE_PATH := hw
-LOCAL_SHARED_LIBRARIES := liblog libEGL libcutils libhardware libutils libsync libsecion
+LOCAL_SHARED_LIBRARIES := liblog libEGL libcutils libhardware libutils libsync libfimg
 
 LOCAL_SRC_FILES := hwcomposer.cpp \
-                   window.cpp
+                   hwcomposer_vsync.cpp \
+                   window.cpp \
+                   utils.cpp \
+                   v4l2.cpp
 
 LOCAL_C_INCLUDES := $(LOCAL_PATH)/../include \
                     $(TOP)/system/core/libsync/include
